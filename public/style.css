@@ -1,4 +1,60 @@
-html,body {
-    background-color: white;
+html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
     font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Keep your existing cursor styles */
+.cursor {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    transition: transform 0.1s ease;
+}
+
+.cursor-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #ff4444;
+    border-radius: 50%;
+}
+
+.cursor-label {
+    position: absolute;
+    left: 15px;
+    top: -5px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#drawing-canvas {
+    display: block;
+}
+
+#bouncing-button {
+    position: fixed;
+    padding: 15px 25px;
+    background-color: #ff69b4;
+    color: white;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    z-index: 1000;
+    transition: transform 0.1s;
+}
+
+#bouncing-button:hover {
+    transform: scale(1.1);
+}
+
+#bouncing-button:active {
+    transform: scale(0.95);
 }

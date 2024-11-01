@@ -3,6 +3,7 @@ let express = require("express");
 let app = express();
 let fs = require('fs');
 let path = require('path');
+let peacefulImageCount = 0;
 
 app.use("/", express.static("public"));
 
@@ -26,11 +27,24 @@ if (!fs.existsSync(imageDir)) {
     }
 }
 
+// Create peaceful image directory if it doesn't exist
+const peaceImageDir = path.join(__dirname, 'public', 'peaceful');
+if (!fs.existsSync(imageDir)) {
+    try {
+        fs.mkdirSync(imageDir, { recursive: true });
+        console.log('Created peaceful images directory at:', imageDir);
+    } catch (err) {
+        console.error('Error creating peaceful images directory:', err);
+    }
+}
+
 // Track available and used images
 let imageCount = 0;
 let availableImages = [];
 let usedImages = new Set();
-let currentDragImages = new Map(); // Track current image for each dragging user
+let currentDragImages = new Map();
+const userProperties = new Map();
+const userCursors = new Map(); // Add this to track cursor positions
 
 // Function to reset the image pool
 function resetImagePool() {
@@ -48,67 +62,151 @@ function getRandomUnusedImage() {
     const randomIndex = Math.floor(Math.random() * availableImages.length);
     const selectedImageIndex = availableImages[randomIndex];
     
-    // Remove the selected image from available and add to used
     availableImages.splice(randomIndex, 1);
     usedImages.add(selectedImageIndex);
     
-    console.log(`Selected image ${selectedImageIndex + 1}. ${availableImages.length} images remaining.`);
     return selectedImageIndex;
 }
 
-//Listen for a client to connect and disconnect
+
+function getRandomDuration() {
+    const minDuration = 10000; // 10 seconds
+    const maxDuration = 30000; // 30 seconds
+    return Math.floor(Math.random() * (maxDuration - minDuration + 1)) + minDuration;
+}
+
 io.on("connection", (socket) => {
     console.log("We have a new client: " + socket.id);
-  
-    // Count the number of PNG files in the images directory
+
     try {
+        // Count regular images
         const files = fs.readdirSync(imageDir);
         imageCount = files.filter(file => file.toLowerCase().endsWith('.png')).length;
-        console.log(`Found ${imageCount} PNG files in images directory`);
         
-        // Initialize the image pools if this is the first connection
+        // Count peaceful images
+        const peacefulFiles = fs.readdirSync(peaceImageDir);
+        peacefulImageCount = peacefulFiles.filter(file => 
+            file.toLowerCase().endsWith('.jpg') || 
+            file.toLowerCase().endsWith('.png')
+        ).length;
+        
         if (availableImages.length === 0 && usedImages.size === 0) {
             resetImagePool();
         }
         
-        socket.emit('image-count', imageCount);
+        // Send both counts to the client
+        socket.emit('image-counts', {
+            regular: imageCount,
+            peaceful: peacefulImageCount
+        });
     } catch (err) {
         console.error('Error reading images directory:', err);
-        socket.emit('image-count', 0);
+        socket.emit('image-counts', {
+            regular: 0,
+            peaceful: 0
+        });
     }
+  
+
+
+    // Send existing users and their cursor positions to the new client
+    socket.emit('all-users', Array.from(userProperties.entries()));
+    userCursors.forEach((position, userId) => {
+        socket.emit('cursor-update', {
+            socketId: userId,
+            ...position
+        });
+    });
+
+    socket.on('user-joined', (properties) => {
+        console.log('User joined with properties:', socket.id, properties);
+        userProperties.set(socket.id, properties);
+        io.emit('user-properties-update', {
+            socketId: socket.id,
+            properties: properties
+        });
+    });
+
+    socket.on('cursor-move', (data) => {
+        // Store the cursor position
+        userCursors.set(socket.id, { x: data.x, y: data.y });
+        
+        // Broadcast cursor position to all clients
+        io.emit('cursor-update', {
+            socketId: socket.id,
+            x: data.x,
+            y: data.y
+        });
+    });
 
     socket.on('request-image', (data) => {
-        let imageIndex;
+        let imageData;
         
-        if (data.isDragging && data.useCurrentImage) {
-            // If dragging, use the stored image index for this socket
-            imageIndex = currentDragImages.get(socket.id);
+        if (data.isChaosMouse) {
+            // During chaos mode, just pass through the data
+            imageData = data;
         } else {
-            // Get a new random image
-            imageIndex = getRandomUnusedImage();
-            if (data.isDragging) {
-                // Store this image index for this socket's dragging session
-                currentDragImages.set(socket.id, imageIndex);
+            // Your existing image selection logic
+            let imageIndex;
+            if (data.isDragging && data.useCurrentImage) {
+                imageIndex = currentDragImages.get(socket.id);
+            } else {
+                imageIndex = getRandomUnusedImage();
+                if (data.isDragging) {
+                    currentDragImages.set(socket.id, imageIndex);
+                }
             }
+            imageData = {
+                ...data,
+                imageIndex: imageIndex
+            };
         }
-
-        // Add the image index to the data
-        const imageData = {
-            ...data,
-            imageIndex: imageIndex
-        };
         
         io.emit('message-share', imageData);
     });
 
+   
+
+    socket.on('clear-canvas-chaos', () => {
+        io.emit('canvas-cleared-chaos');
+    });
+
+
+
+
+
     socket.on("disconnect", () => {
         console.log("A client has disconnected: " + socket.id);
-        // Clean up any stored drag image data for this socket
+        userProperties.delete(socket.id);
+        userCursors.delete(socket.id);
         currentDragImages.delete(socket.id);
+        io.emit('user-disconnected', socket.id);
     });
+
+    socket.on('chaos-button-pressed', () => {
+        const randomIndex = Math.floor(Math.random() * peacefulImageCount);
+        const duration = getRandomDuration();
+        
+        io.emit('start-chaos-audio');
+        io.emit('chaos-image-selected', { 
+            imageIndex: randomIndex,
+            duration: duration
+        });
+    });
+
+
+
+
+    socket.on('chaos-mode-ended', () => {
+        io.emit('end-chaos-audio');
+    });
+
+
+
+
+
 });
 
 server.listen(port, () => {
     console.log("App listening at port: " + port);
-    console.log("Images directory path:", imageDir);
 });
